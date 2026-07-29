@@ -2,8 +2,9 @@
 set -euxo pipefail
 . "$(dirname "$0")/lib/guard.sh"
 require_linux debootstrap mkfs.ext4 chroot
+. "$(dirname "$0")/lib/env.sh"
 
-OUT=/Users/dylanwong/daedal/kernel/build
+OUT=$DAEDAL_BUILD
 mkdir -p "$OUT"
 
 DEBIAN_SUITE=${DEBIAN_SUITE:-trixie}

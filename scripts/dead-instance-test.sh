@@ -2,8 +2,10 @@
 set -uo pipefail
 . "$(dirname "$0")/lib/guard.sh"
 require_linux
-B=/Users/dylanwong/daedal/kernel/build
-BIN=/Users/dylanwong/daedal/bin/daedald-linux-arm64
+. "$(dirname "$0")/lib/env.sh"
+B=$DAEDAL_BUILD
+BIN=$DAEDAL_DAEDALD
+daedal_ensure_daedald
 STATE=/tmp/daedald-dead
 API=http://127.0.0.1:7033
 
@@ -11,9 +13,9 @@ sudo pkill -f daedald 2>/dev/null || true
 sleep 1
 sudo chmod 666 /dev/kvm
 rm -rf "$STATE"; mkdir -p "$STATE/state/images"
-cp "$B/vmlinux-aarch64" "$STATE/state/images/vmlinux-kvm"
+cp "$DAEDAL_VMLINUX" "$STATE/state/images/vmlinux-kvm"
 cp "$B/rootfs.ext4" "$STATE/state/images/rootfs.ext4"
-sudo install -m0755 "$B/firecracker-aarch64" /usr/local/bin/firecracker
+sudo install -m0755 "$DAEDAL_FC_BIN" /usr/local/bin/firecracker
 cat > "$STATE/config.json" <<JSON
 { "listen": "127.0.0.1:7033", "state_dir": "$STATE/state", "firecracker_bin": "/usr/local/bin/firecracker",
   "backends": { "kvm": { "kernel_path": "$STATE/state/images/vmlinux-kvm", "rootfs_path": "$STATE/state/images/rootfs.ext4",

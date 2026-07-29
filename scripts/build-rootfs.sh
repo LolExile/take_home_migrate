@@ -2,11 +2,12 @@
 set -euxo pipefail
 . "$(dirname "$0")/lib/guard.sh"
 require_linux mkfs.ext4
+. "$(dirname "$0")/lib/env.sh"
 # Minimal ext4 rootfs whose init runs a heartbeat: a counter kept ONLY in guest
 # RAM (tmpfs). After a snapshot/restore migration the counter must continue from
 # where it was -- that is the memory-continuity proof. If memory were lost the
 # guest would reboot and the counter would restart at 0.
-OUT=/Users/dylanwong/daedal/kernel/build
+OUT=$DAEDAL_BUILD
 mkdir -p "$OUT"
 ROOT=$(mktemp -d)
 mkdir -p "$ROOT"/{bin,sbin,proc,sys,dev,tmp,etc}

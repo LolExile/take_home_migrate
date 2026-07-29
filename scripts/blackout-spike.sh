@@ -6,16 +6,22 @@
 set -uo pipefail
 . "$(dirname "$0")/lib/guard.sh"
 require_linux
-B=/Users/dylanwong/daedal/kernel/build
+. "$(dirname "$0")/lib/env.sh"
+B=$DAEDAL_BUILD
 FC=/usr/local/bin/firecracker
-UFFD=$(find ~/fc/firecracker-next/build ~/fc/firecracker-next/target -name uffd_on_demand_handler -type f -executable 2>/dev/null | head -1)
+UFFD=$(daedal_find_uffd)
 MEM_MIB=${1:-128}
 SHM=/dev/shm/mig; rm -rf "$SHM"; mkdir -p "$SHM"
 RUN=/tmp/blackout; rm -rf "$RUN"; mkdir -p "$RUN"
-sudo install -m0755 "$B/firecracker-aarch64" "$FC"
+sudo install -m0755 "$DAEDAL_FC_BIN" "$FC"
 sudo chmod 666 /dev/kvm
 sudo sysctl -w vm.unprivileged_userfaultfd=1 >/dev/null 2>&1 || true
-[ -e /dev/userfaultfd ] && sudo chmod 666 /dev/userfaultfd
+if [ ! -e /dev/userfaultfd ]; then
+  echo "ERROR: /dev/userfaultfd is missing; this spike needs the Uffd backend." >&2
+  echo "Kernel 6.1+ provides it. On WSL2: run 'wsl --update' from Windows, then 'wsl --shutdown' and retry." >&2
+  exit 1
+fi
+sudo chmod 666 /dev/userfaultfd
 
 echo "firecracker=$($FC --version | head -1)  uffd_handler=$UFFD  mem=${MEM_MIB}MiB"
 
@@ -28,7 +34,7 @@ SRC_SOCK="$RUN/src.sock"; rm -f "$SRC_SOCK"
 "$FC" --api-sock "$SRC_SOCK" > "$RUN/src.log" 2>&1 &
 SRC_PID=$!
 for i in $(seq 1 100); do [ -S "$SRC_SOCK" ] && break; sleep 0.02; done
-api "$SRC_SOCK" PUT /boot-source '{"kernel_image_path":"'$B'/vmlinux-aarch64","boot_args":"console=ttyS0 reboot=k panic=1 pci=off init=/init"}' >/dev/null
+api "$SRC_SOCK" PUT /boot-source '{"kernel_image_path":"'$DAEDAL_VMLINUX'","boot_args":"console=ttyS0 reboot=k panic=1 pci=off init=/init"}' >/dev/null
 api "$SRC_SOCK" PUT /drives/rootfs '{"drive_id":"rootfs","path_on_host":"'$B'/rootfs.ext4","is_root_device":true,"is_read_only":false}' >/dev/null
 api "$SRC_SOCK" PUT /machine-config '{"vcpu_count":1,"mem_size_mib":'$MEM_MIB',"track_dirty_pages":true}' >/dev/null
 api "$SRC_SOCK" PUT /actions '{"action_type":"InstanceStart"}' >/dev/null

@@ -1,7 +1,12 @@
 #!/bin/bash
+# Mixed driver for the GUI demo. On macOS it splits work between the host
+# (daedald build, vnc-ws-gateway, the frontend) and the Lima VM (guests, taps,
+# agents). On Linux (WSL2 or a bare Linux box) there is no VM boundary:
+# vm_run degrades to a local shell and everything runs on this one host.
 set -uo pipefail
-ROOT=/Users/dylanwong/daedal
-IMAGES=$ROOT/kernel/build
+. "$(dirname "$0")/lib/env.sh"
+ROOT=$DAEDAL_ROOT
+IMAGES=$DAEDAL_BUILD
 DAEDAL_VM=${DAEDAL_VM:-daedal-kvm}
 BR=${BR:-br0}
 HOST_IP=${HOST_IP:-172.20.0.1}
@@ -30,16 +35,30 @@ AGENT_LOG_PIN=${AGENT_LOG_PIN:-/tmp/vnc-agent-pin.log}
 GATEWAY_TARGET=${GATEWAY_TARGET:-/tmp/gateway-target}
 WEB_PORT=${WEB_PORT:-5173}
 
-vm_run() { limactl shell "$DAEDAL_VM" -- bash -lc "$1"; }
+if [ "$(uname -s)" = "Linux" ]; then
+  ON_LINUX=1
+  vm_run() { bash -lc "$1"; }
+else
+  ON_LINUX=
+  vm_run() { limactl shell "$DAEDAL_VM" -- bash -lc "$1"; }
+fi
 
 echo "=== preflight ==="
-command -v limactl >/dev/null 2>&1 || { echo "ERROR: limactl not found on the macOS host" >&2; exit 1; }
-if ! limactl list 2>/dev/null | awk -v v="$DAEDAL_VM" '$1==v && $2=="Running"{f=1} END{exit !f}'; then
-  echo "ERROR: Lima VM '$DAEDAL_VM' is not Running. Start it with: limactl start $DAEDAL_VM" >&2
-  exit 1
+if [ -z "$ON_LINUX" ]; then
+  command -v limactl >/dev/null 2>&1 || { echo "ERROR: limactl not found on the macOS host" >&2; exit 1; }
+  if ! limactl list 2>/dev/null | awk -v v="$DAEDAL_VM" '$1==v && $2=="Running"{f=1} END{exit !f}'; then
+    echo "ERROR: Lima VM '$DAEDAL_VM' is not Running. Start it with: limactl start $DAEDAL_VM" >&2
+    exit 1
+  fi
+else
+  [ -e /dev/kvm ] || { echo "ERROR: /dev/kvm is missing on this Linux host (nested virtualization off?). See docs/RUN-ON-WINDOWS.md" >&2; exit 1; }
+  case "$ROOT" in /mnt/[a-zA-Z]/*)
+    echo "ERROR: repo is on a Windows drive mount ($ROOT); clone it onto the Linux filesystem first (see docs/RUN-ON-WINDOWS.md)" >&2
+    exit 1 ;;
+  esac
 fi
 for c in go cargo npm; do
-  command -v "$c" >/dev/null 2>&1 || { echo "ERROR: $c not found on the macOS host" >&2; exit 1; }
+  command -v "$c" >/dev/null 2>&1 || { echo "ERROR: $c not found on this host" >&2; exit 1; }
 done
 vm_run "test -f $IMAGES/$DESK_IMG.ext4" || {
   echo "ERROR: $IMAGES/$DESK_IMG.ext4 is missing. Build it first:" >&2
@@ -53,11 +72,11 @@ if ! vm_run "test -f $IMAGES/$PIN_IMG.ext4"; then
 fi
 echo "vm=$DAEDAL_VM running, go/cargo/npm present, $DESK_IMG.ext4 and $PIN_IMG.ext4 present"
 
-echo "=== rebuild daedald for linux/arm64 (macOS cross-compile, no cgo) ==="
+echo "=== rebuild daedald for linux/$DAEDAL_GOARCH (no cgo) ==="
 mkdir -p "$ROOT/bin"
-( cd "$ROOT/api" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o "$ROOT/bin/daedald-linux-arm64" ./cmd/daedald ) \
-  && echo "daedald-linux-arm64: $(file -b "$ROOT/bin/daedald-linux-arm64" 2>/dev/null)" \
-  || { echo "ERROR: daedald cross-build failed" >&2; exit 1; }
+( cd "$ROOT/api" && GOOS=linux GOARCH=$DAEDAL_GOARCH CGO_ENABLED=0 go build -o "$DAEDAL_DAEDALD" ./cmd/daedald ) \
+  && echo "daedald-linux-$DAEDAL_GOARCH: $(file -b "$DAEDAL_DAEDALD" 2>/dev/null)" \
+  || { echo "ERROR: daedald build failed" >&2; exit 1; }
 
 echo "=== stop anything already holding the desktop rootfs or port 7040 ==="
 vm_run "for p in \$(sudo ss -H -ltnp 'sport = :${DAEDALD_LISTEN##*:}' 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u); do
@@ -107,10 +126,10 @@ df -h /dev/shm | tail -1"
 
 echo "=== start daedald livemigrate serve -persistent-guest (the desktop guest IS the migrating VM) ==="
 vm_run "rm -f /tmp/daedald-serve.log
-setsid $ROOT/bin/daedald-linux-arm64 livemigrate serve \
+setsid $DAEDAL_DAEDALD livemigrate serve \
   -listen $DAEDALD_LISTEN \
-  -firecracker $IMAGES/firecracker-aarch64 \
-  -kernel $IMAGES/vmlinux-aarch64 \
+  -firecracker $DAEDAL_FC_BIN \
+  -kernel $DAEDAL_VMLINUX \
   -rootfs $IMAGES/$DESK_IMG.ext4 \
   -shared-dir $SHARED_LM \
   -session-work-dir $SESSION_WORK \
@@ -187,16 +206,24 @@ reg "$HOST_A" "${NODE_ID_MIG:-}"
 reg "$HOST_B" "${NODE_ID_PIN:-}"
 echo "registered: $(curl -s "http://$DAEDALD_LISTEN/v1/hosts")"
 
-echo "=== vnc-ws-gateway on the macOS host ==="
+echo "=== vnc-ws-gateway on the driver host ==="
 GATEWAY_LOG=/tmp/vnc-ws-gateway.log
 pkill -x vnc-ws-gateway 2>/dev/null || true
 sleep 0.3
 rm -f "$GATEWAY_LOG"
-( cd "$ROOT/gateway" && cargo build --release -p vnc-ws-gateway ) >>"$GATEWAY_LOG" 2>&1
-GATEWAY_BIN=""
-for cand in "$ROOT/gateway/target/release/vnc-ws-gateway" "$ROOT/gateway/target/debug/vnc-ws-gateway"; do
-  [ -x "$cand" ] && { GATEWAY_BIN=$cand; break; }
-done
+gateway_bin() {
+  GATEWAY_BIN=""
+  for cand in "$GATEWAY_TARGET/release/vnc-ws-gateway" \
+              "$ROOT/gateway/target/release/vnc-ws-gateway" \
+              "$ROOT/gateway/target/debug/vnc-ws-gateway"; do
+    [ -x "$cand" ] && { GATEWAY_BIN=$cand; break; }
+  done
+}
+gateway_bin
+if [ -z "$GATEWAY_BIN" ]; then
+  ( cd "$ROOT/gateway" && cargo build --release -p vnc-ws-gateway ) >>"$GATEWAY_LOG" 2>&1
+  gateway_bin
+fi
 if [ -n "$GATEWAY_BIN" ]; then
   nohup "$GATEWAY_BIN" >"$GATEWAY_LOG" 2>&1 &
   disown

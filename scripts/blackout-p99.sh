@@ -10,20 +10,24 @@
 set -uo pipefail
 . "$(dirname "$0")/lib/guard.sh"
 require_linux
+. "$(dirname "$0")/lib/env.sh"
 N=${1:-100}
-MEM=${2:-32}
+MEM=${2:-$DAEDAL_MIN_GUEST_MIB}
 TARGET=${3:-30}
-BIN=/Users/dylanwong/daedal/bin/daedald-linux-arm64
-UFFD=$(find ~/fc/firecracker-next/build -name uffd_on_demand_handler -type f -executable | head -1)
-sudo chmod 666 /dev/kvm; sudo sysctl -w vm.unprivileged_userfaultfd=1 >/dev/null; sudo chmod 666 /dev/userfaultfd
-sudo install -m0755 /Users/dylanwong/daedal/kernel/build/firecracker-aarch64 /usr/local/bin/firecracker
+BIN=$DAEDAL_DAEDALD
+daedal_ensure_daedald
+UFFD=$(daedal_find_uffd)
+sudo chmod 666 /dev/kvm
+sudo sysctl -w vm.unprivileged_userfaultfd=1 >/dev/null 2>&1 || true
+[ -e /dev/userfaultfd ] && sudo chmod 666 /dev/userfaultfd
+sudo install -m0755 "$DAEDAL_FC_BIN" /usr/local/bin/firecracker
 OUT=/tmp/p99; rm -rf "$OUT"; mkdir -p "$OUT"
 
 for i in $(seq 1 "$N"); do
   sudo pkill -f 'firecracker --api-sock' 2>/dev/null; sudo pkill -f uffd_on_demand 2>/dev/null
   "$BIN" livemigrate -firecracker /usr/local/bin/firecracker -uffd-handler "$UFFD" \
-    -kernel /Users/dylanwong/daedal/kernel/build/vmlinux-aarch64 \
-    -rootfs /Users/dylanwong/daedal/kernel/build/rootfs.ext4 \
+    -kernel "$DAEDAL_VMLINUX" \
+    -rootfs "$DAEDAL_BUILD/rootfs.ext4" \
     -mem "$MEM" -precopy-rounds 3 -target-ms "$TARGET" \
     -shared-dir /dev/shm/p99-$i -work-dir /tmp/p99/w-$i \
     -report "$OUT/r-$i.json" > "$OUT/log-$i" 2>&1

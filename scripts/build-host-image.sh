@@ -6,15 +6,17 @@
 set -euxo pipefail
 . "$(dirname "$0")/lib/guard.sh"
 require_linux
+. "$(dirname "$0")/lib/env.sh"
 DST=${1:-$HOME/host-rootfs}
-B=/Users/dylanwong/daedal/kernel/build
+B=$DAEDAL_BUILD
 sudo podman rm -f host-a host-b >/dev/null 2>&1 || true
 case "${DST:-}" in ""|/|"$HOME"|"$HOME/") echo "refusing to sudo rm -rf '$DST'" >&2; exit 1;; esac
 sudo rm -rf "$DST"; mkdir -p "$DST"/{bin,lib,lib64,usr/lib,proc,sys,dev,tmp,shared,etc}
 
-install -m0755 "$B/firecracker-aarch64" "$DST/bin/firecracker"
-install -m0755 /Users/dylanwong/daedal/bin/daedald-linux-arm64 "$DST/bin/daedald"
-UFFD=$(find ~/fc/firecracker-next/build -name uffd_on_demand_handler -type f -executable | head -1)
+daedal_ensure_daedald
+install -m0755 "$DAEDAL_FC_BIN" "$DST/bin/firecracker"
+install -m0755 "$DAEDAL_DAEDALD" "$DST/bin/daedald"
+UFFD=$(daedal_find_uffd)
 install -m0755 "$UFFD" "$DST/bin/uffd_on_demand_handler"
 cp "$(command -v busybox)" "$DST/bin/busybox"
 for a in sh ls cat sleep grep; do ln -sf busybox "$DST/bin/$a"; done
@@ -25,8 +27,11 @@ for bin in "$DST/bin/firecracker" "$DST/bin/uffd_on_demand_handler"; do
     d="$DST$(dirname "$lib")"; mkdir -p "$d"; cp -Lu "$lib" "$d/" 2>/dev/null || true
   done
 done
-# the dynamic loader
-cp -Lu /lib/ld-linux-aarch64.so.1 "$DST/lib/" 2>/dev/null || true
+# the dynamic loader (name and location differ per arch; copy whatever exists)
+for l in /lib/ld-linux-*.so.* /lib64/ld-linux-*.so.*; do
+  [ -e "$l" ] || continue
+  d="$DST$(dirname "$l")"; mkdir -p "$d"; cp -Lu "$l" "$d/" 2>/dev/null || true
+done
 
 echo 'nameserver 1.1.1.1' > "$DST/etc/resolv.conf"
 du -sh "$DST"

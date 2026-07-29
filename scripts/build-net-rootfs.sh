@@ -6,8 +6,9 @@
 set -euxo pipefail
 . "$(dirname "$0")/lib/guard.sh"
 require_linux mkfs.ext4 gcc
-OUT=/Users/dylanwong/daedal/kernel/build
-SRC=/Users/dylanwong/daedal/images
+. "$(dirname "$0")/lib/env.sh"
+OUT=$DAEDAL_BUILD
+SRC=$DAEDAL_ROOT/images
 GUEST_IP=${GUEST_IP:-172.20.0.2}
 HOST_IP=${HOST_IP:-172.20.0.1}
 PORT=${PORT:-9999}

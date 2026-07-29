@@ -7,14 +7,18 @@
 set -uo pipefail
 . "$(dirname "$0")/lib/guard.sh"
 require_linux podman ip
+. "$(dirname "$0")/lib/env.sh"
 ROOTFS=$HOME/host-rootfs
-IMAGES=/Users/dylanwong/daedal/kernel/build
+IMAGES=$DAEDAL_BUILD
 SHARED=/dev/shm/dhost
 BR=br0; SRC_TAP=tap-src; DST_TAP=tap-dst
 HOST_IP=172.20.0.1; PORT=9999
 PODMAN="sudo podman"
 
-sudo chmod 666 /dev/kvm; sudo sysctl -w vm.unprivileged_userfaultfd=1 >/dev/null; sudo chmod 666 /dev/userfaultfd
+daedal_ensure_daedald
+sudo chmod 666 /dev/kvm
+sudo sysctl -w vm.unprivileged_userfaultfd=1 >/dev/null 2>&1 || true
+[ -e /dev/userfaultfd ] && sudo chmod 666 /dev/userfaultfd
 $PODMAN rm -f host-a host-b >/dev/null 2>&1 || true
 sudo rm -rf "$SHARED"; mkdir -p "$SHARED"; chmod 777 "$SHARED"
 
@@ -42,21 +46,21 @@ sleep 2
 echo "hosts: a=$($PODMAN inspect -f '{{.State.Running}}' host-a) b=$($PODMAN inspect -f '{{.State.Running}}' host-b)"
 echo "sockets: src=$(test -S $SHARED/src.sock && echo y || echo n) dst=$(test -S $SHARED/dst.sock && echo y || echo n)"
 
-python3 /Users/dylanwong/daedal/images/collector.py "$HOST_IP" "$PORT" 22 /tmp/beacon-log.txt >/dev/null 2>&1 &
+python3 "$DAEDAL_ROOT/images/collector.py" "$HOST_IP" "$PORT" 22 /tmp/beacon-log.txt >/dev/null 2>&1 &
 COL=$!; sleep 0.5
 
 # orchestrator drives the two container hosts; guest paths are container-internal (/images)
-sudo /Users/dylanwong/daedal/bin/daedald-linux-arm64 livemigrate -attach \
+sudo "$DAEDAL_DAEDALD" livemigrate -attach \
   -src-sock "$SHARED/src.sock" -dst-sock "$SHARED/dst.sock" \
   -src-log "$SHARED/src.log" -dst-log "$SHARED/dst.log" \
-  -kernel "$IMAGES/vmlinux-aarch64" -rootfs "$IMAGES/rootfs-net.ext4" \
-  -mem 32 -precopy-rounds 3 -mem-backend File -target-ms 30 \
+  -kernel "$DAEDAL_VMLINUX" -rootfs "$IMAGES/rootfs-net.ext4" \
+  -mem "${MEM_MIB:-$DAEDAL_MIN_GUEST_MIB}" -precopy-rounds 3 -mem-backend File -target-ms 30 \
   -net-iface eth0 -guest-mac 06:00:AC:14:00:02 -src-tap "$SRC_TAP" -dst-tap "$DST_TAP" \
   -shared-dir "$SHARED" -work-dir /tmp/twohost -report /tmp/mig-report.json >/dev/null 2>&1 || true
 
 wait $COL
 echo "=== client-observed migration blackout across the two container hosts ==="
-python3 /Users/dylanwong/daedal/images/analyze.py /tmp/beacon-log.txt /tmp/mig-report.json 2>&1 || true
+python3 "$DAEDAL_ROOT/images/analyze.py" /tmp/beacon-log.txt /tmp/mig-report.json 2>&1 || true
 echo "=== src firecracker log tail ==="; tail -8 "$SHARED/src.log" 2>&1
 echo "=== dst firecracker log tail ==="; tail -6 "$SHARED/dst.log" 2>&1
 if [ -z "${KEEP:-}" ]; then $PODMAN rm -f host-a host-b >/dev/null 2>&1 || true; fi

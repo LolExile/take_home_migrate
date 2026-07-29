@@ -4,18 +4,26 @@
 set -uo pipefail
 . "$(dirname "$0")/lib/guard.sh"
 require_linux
-B=/Users/dylanwong/daedal/kernel/build
+. "$(dirname "$0")/lib/env.sh"
+B=$DAEDAL_BUILD
 FC=/usr/local/bin/firecracker
-UFFD=$(find ~/fc/firecracker-next/build -name uffd_on_demand_handler -type f -executable 2>/dev/null | head -1)
+UFFD=$(daedal_find_uffd)
 SHM=/dev/shm/mig2; rm -rf "$SHM"; mkdir -p "$SHM"
 RUN=/tmp/uffdok; rm -rf "$RUN"; mkdir -p "$RUN"
-sudo install -m0755 "$B/firecracker-aarch64" "$FC" 2>/dev/null
-sudo chmod 666 /dev/kvm; sudo sysctl -w vm.unprivileged_userfaultfd=1 >/dev/null; sudo chmod 666 /dev/userfaultfd
+sudo install -m0755 "$DAEDAL_FC_BIN" "$FC" 2>/dev/null
+sudo chmod 666 /dev/kvm
+sudo sysctl -w vm.unprivileged_userfaultfd=1 >/dev/null 2>&1 || true
+if [ ! -e /dev/userfaultfd ]; then
+  echo "ERROR: /dev/userfaultfd is missing; this check needs the Uffd backend." >&2
+  echo "Kernel 6.1+ provides it. On WSL2: run 'wsl --update' from Windows, then 'wsl --shutdown' and retry." >&2
+  exit 1
+fi
+sudo chmod 666 /dev/userfaultfd
 api(){ curl -s --unix-socket "$1" -X "$2" "http://localhost$3" -H 'Content-Type: application/json' -d "$4"; }
 
 SRC="$RUN/src.sock"; "$FC" --api-sock "$SRC" > "$RUN/src.log" 2>&1 & SRC_PID=$!
 for i in $(seq 1 100); do [ -S "$SRC" ] && break; sleep 0.02; done
-api "$SRC" PUT /boot-source '{"kernel_image_path":"'$B'/vmlinux-aarch64","boot_args":"console=ttyS0 reboot=k panic=1 pci=off init=/init"}' >/dev/null
+api "$SRC" PUT /boot-source '{"kernel_image_path":"'$DAEDAL_VMLINUX'","boot_args":"console=ttyS0 reboot=k panic=1 pci=off init=/init"}' >/dev/null
 api "$SRC" PUT /drives/rootfs '{"drive_id":"rootfs","path_on_host":"'$B'/rootfs.ext4","is_root_device":true,"is_read_only":false}' >/dev/null
 api "$SRC" PUT /machine-config '{"vcpu_count":1,"mem_size_mib":128}' >/dev/null
 api "$SRC" PUT /actions '{"action_type":"InstanceStart"}' >/dev/null

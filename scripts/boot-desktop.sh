@@ -2,7 +2,8 @@
 set -euxo pipefail
 . "$(dirname "$0")/lib/guard.sh"
 require_linux
-B=/Users/dylanwong/daedal/kernel/build
+. "$(dirname "$0")/lib/env.sh"
+B=$DAEDAL_BUILD
 FC=/usr/local/bin/firecracker
 BR=${BR:-br0}
 TAP=${TAP:-tap-desk}
@@ -13,7 +14,7 @@ ROOTFS=${ROOTFS:-$B/rootfs-desktop.ext4}
 API_SOCK=$RUN/fc.sock
 LOG=$RUN/serial.log
 
-sudo install -m0755 "$B/firecracker-aarch64" "$FC"
+sudo install -m0755 "$DAEDAL_FC_BIN" "$FC"
 sudo chmod 666 /dev/kvm
 pkill -f "firecracker --api-sock $API_SOCK" 2>/dev/null || true
 sleep 0.3
@@ -42,7 +43,7 @@ echo $! > "$RUN/fc.pid"
 disown
 for i in $(seq 1 100); do [ -S "$API_SOCK" ] && break; sleep 0.05; done
 
-api PUT /boot-source '{"kernel_image_path":"'$B'/vmlinux-aarch64","boot_args":"console=ttyS0 reboot=k panic=1 pci=off net.ifnames=0 biosdevname=0 root=/dev/vda rw init=/sbin/init"}'
+api PUT /boot-source '{"kernel_image_path":"'$DAEDAL_VMLINUX'","boot_args":"console=ttyS0 reboot=k panic=1 pci=off net.ifnames=0 biosdevname=0 root=/dev/vda rw init=/sbin/init"}'
 api PUT /drives/rootfs '{"drive_id":"rootfs","path_on_host":"'$ROOTFS'","is_root_device":true,"is_read_only":false}'
 api PUT /machine-config '{"vcpu_count":2,"mem_size_mib":1024}'
 api PUT /network-interfaces/eth0 '{"iface_id":"eth0","guest_mac":"'$GUEST_MAC'","host_dev_name":"'$TAP'"}'
