@@ -38,7 +38,10 @@ sudo ip link set "$TAP" up
 
 api(){ curl -s --unix-socket "$API_SOCK" -X "$1" "http://localhost$2" -H 'Content-Type: application/json' -d "$3"; }
 
-nohup "$FC" --api-sock "$API_SOCK" 0<> "$RUN/console.in" > "$LOG" 2>&1 &
+# setsid, not nohup: firecracker installs its own SIGHUP handler (nohup's
+# SIG_IGN is overridden), so it dies with the launching session unless fully
+# detached. Seen for real: "Shutting down VM after intercepting signal 1".
+setsid "$FC" --api-sock "$API_SOCK" 0<> "$RUN/console.in" > "$LOG" 2>&1 &
 echo $! > "$RUN/fc.pid"
 disown
 for i in $(seq 1 100); do [ -S "$API_SOCK" ] && break; sleep 0.05; done

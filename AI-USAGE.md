@@ -29,7 +29,7 @@ the migration) and reading the actual output.
 
 ## What the human directed
 
-- The problem framing, the environment choice (macOS + Lima providing nested KVM),
+- The problem framing, the environment choice (macOS + Lima & Windows + WSL providing nested KVM),
   the decision to demonstrate on the fast native-KVM path, and review of the
   approach and results.
 - One request was explicitly **declined**: a suggestion to insert Unicode

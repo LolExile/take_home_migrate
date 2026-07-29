@@ -56,15 +56,21 @@ echo "root:$ROOT_PASSWORD" | sudo chroot "$ROOT" chpasswd
 VNC_UID=$(sudo chroot "$ROOT" id -u vncuser)
 VNC_GID=$(sudo chroot "$ROOT" id -g vncuser)
 
-sudo install -d -m 700 -o "$VNC_UID" -g "$VNC_GID" "$ROOT/home/vncuser/.vnc"
-cat <<'XSTARTUP' | sudo tee "$ROOT/home/vncuser/.vnc/xstartup" >/dev/null
+# TigerVNC >= 1.14 (Debian trixie) reads ~/.config/tigervnc and tries to
+# auto-migrate a legacy ~/.vnc dir on startup; that migration fails under the
+# systemd unit and crash-loops the service ("Could not migrate ... to
+# .config/tigervnc", seen for real on x86_64 trixie). Install the config in
+# the new location and never create ~/.vnc at all.
+sudo install -d -m 700 -o "$VNC_UID" -g "$VNC_GID" "$ROOT/home/vncuser/.config"
+sudo install -d -m 700 -o "$VNC_UID" -g "$VNC_GID" "$ROOT/home/vncuser/.config/tigervnc"
+cat <<'XSTARTUP' | sudo tee "$ROOT/home/vncuser/.config/tigervnc/xstartup" >/dev/null
 #!/bin/sh
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 exec startxfce4
 XSTARTUP
-sudo chmod 755 "$ROOT/home/vncuser/.vnc/xstartup"
-sudo chown -R "$VNC_UID:$VNC_GID" "$ROOT/home/vncuser/.vnc"
+sudo chmod 755 "$ROOT/home/vncuser/.config/tigervnc/xstartup"
+sudo chown -R "$VNC_UID:$VNC_GID" "$ROOT/home/vncuser/.config"
 
 cat <<UNIT | sudo tee "$ROOT/etc/systemd/system/vncdesktop.service" >/dev/null
 [Unit]

@@ -38,8 +38,10 @@ for p in $(pgrep -f uffd_on_demand_handler 2>/dev/null); do
   killed=$((killed+1))
 done
 
-# VNC tunnel agents + websocket gateway
-sudo pkill -x vnc-tunnel-agent 2>/dev/null && { say "killed vnc-tunnel-agent(s)"; killed=$((killed+1)); }
+# VNC tunnel agents + websocket gateway. -f, not -x: pkill -x silently never
+# matches names longer than 15 chars (comm truncation), and vnc-tunnel-agent
+# is 16.
+sudo pkill -f vnc-tunnel-agent 2>/dev/null && { say "killed vnc-tunnel-agent(s)"; killed=$((killed+1)); }
 sudo pkill -x vnc-ws-gateway 2>/dev/null && { say "killed vnc-ws-gateway"; killed=$((killed+1)); }
 
 # vite dev server (started by desktop-migration-demo.sh out of $DAEDAL_ROOT/web)

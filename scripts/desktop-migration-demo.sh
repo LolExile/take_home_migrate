@@ -225,7 +225,9 @@ if [ -z "$GATEWAY_BIN" ]; then
   gateway_bin
 fi
 if [ -n "$GATEWAY_BIN" ]; then
-  nohup "$GATEWAY_BIN" >"$GATEWAY_LOG" 2>&1 &
+  # setsid, not nohup: detached from this session so it survives the script's
+  # shell exiting (nohup alone dies with a non-interactive WSL session)
+  setsid "$GATEWAY_BIN" < /dev/null >"$GATEWAY_LOG" 2>&1 &
   disown
   sleep 1
   GATEWAY_ADDR=$(grep -o 'listening on ws://[^ ]*' "$GATEWAY_LOG" | head -1)
@@ -239,7 +241,7 @@ if curl -s -o /dev/null "http://localhost:$WEB_PORT/"; then
   echo "already serving on :$WEB_PORT, leaving it alone"
 else
   ( cd "$ROOT/web" && npm install >/tmp/web-install.log 2>&1 )
-  ( cd "$ROOT/web" && nohup npm run dev -- --port "$WEB_PORT" --strictPort >/tmp/web-dev.log 2>&1 & )
+  ( cd "$ROOT/web" && setsid npm run dev -- --port "$WEB_PORT" --strictPort </dev/null >/tmp/web-dev.log 2>&1 & )
   sleep 4
   grep -o 'http://localhost:[0-9]*/' /tmp/web-dev.log | head -1
 fi
